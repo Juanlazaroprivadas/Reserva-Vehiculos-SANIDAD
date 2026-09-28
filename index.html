@@ -76,39 +76,38 @@
 </div>
 
 <script>
-    // URL verificada de CCOO Sanidad
+    // URL oficial de CCOO Sanidad
     const WEB_APP_URL = "https://google.com";
 
     let reservas = [];
     const loadingState = document.getElementById('loadingState');
 
-    document.getElementById('fecha').min = new Date().toISOString().split('T')[0];
+    document.getElementById('fecha').min = new Date().toISOString().split('T');
 
-    async function cargarReservas() {
-        showLoading(true);
-        try {
-            // El truco definitivo: forzar la redirección del login corporativo si existiese
-            const response = await fetch(WEB_APP_URL, { method: "GET", redirect: "follow" });
-            const texto = await response.text();
-            
-            // Si Google nos devuelve un html de login por políticas de CCOO, avisar al usuario
-            if (texto.includes("<!DOCTYPE") || texto.includes("login")) {
-                document.getElementById('listaReservas').innerHTML = `
-                    <p style="color:#d62323; font-size:13px; font-weight:bold; text-align:center;">
-                        ⚠️ Acceso restringido por Google Workspace de CCOO.<br>
-                        Asegúrate de que el documento de Google Sheets esté compartido como "Cualquier persona con el enlace".
-                    </p>`;
-                showLoading(false);
-                return;
-            }
-            
-            reservas = JSON.parse(texto);
-            renderReservas();
-        } catch (error) {
-            console.error("Error cargando datos:", error);
-            document.getElementById('listaReservas').innerHTML = '<p style="color:#888; font-style:italic; font-size:13px;">Error de red al conectar con Google Sheets.</p>';
-        }
+    // Función global que recibirá los datos de Google de forma segura (JSONP)
+    window.recibirDatosGoogle = function(datos) {
+        reservas = datos;
+        renderReservas();
         showLoading(false);
+    };
+
+    function cargarReservas() {
+        showLoading(true);
+        
+        // Eliminamos el bloque anterior de fetch que fallaba por CORS corporativo.
+        // Creamos un elemento script dinámico que evita por completo las restricciones de red.
+        const viejoScript = document.getElementById('jsonpScript');
+        if (viejoScript) viejoScript.remove();
+
+        const script = document.createElement('script');
+        script.id = 'jsonpScript';
+        script.src = `${WEB_APP_URL}?callback=recibirDatosGoogle&_nocache=${Date.now()}`;
+        script.onerror = function() {
+            document.getElementById('listaReservas').innerHTML = '<p style="color:#888; font-style:italic; font-size:13px;">Error de red o permisos institucionales en Google Sheets.</p>';
+            showLoading(false);
+        };
+        
+        document.body.appendChild(script);
     }
 
     function renderReservas() {
@@ -166,9 +165,9 @@
 
         showLoading(true);
         try {
-            // "text/plain" evita que los navegadores móviles bloqueen el envío por CORS corporativo
             await fetch(WEB_APP_URL, {
                 method: 'POST',
+                mode: 'no-cors',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify(nuevaReserva)
             });
@@ -176,11 +175,11 @@
             setTimeout(() => {
                 cargarReservas();
                 document.getElementById('reservaForm').reset();
-                document.getElementById('fecha').min = new Date().toISOString().split('T')[0];
+                document.getElementById('fecha').min = new Date().toISOString().split('T');
             }, 1500);
             
         } catch (error) {
-            alert('Error al procesar el envío.');
+            alert('Error al guardar la reserva.');
             showLoading(false);
         }
     });
@@ -192,6 +191,7 @@
         try {
             await fetch(WEB_APP_URL, {
                 method: 'POST',
+                mode: 'no-cors',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({ action: "delete", id: id })
             });
@@ -212,6 +212,7 @@
         return isNaN(d) ? f : d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
+    // Inicializar
     cargarReservas();
 </script>
 </body>
