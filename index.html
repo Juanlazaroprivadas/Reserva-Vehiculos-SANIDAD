@@ -33,7 +33,7 @@
 <div class="container">
     <div class="header">
         <h1>CCOO Sanidad</h1>
-        <p>Flota de Vehículos Compartida</p>
+        <p>Gestión de Vehículos de la Flota en Tiempo Real</p>
     </div>
 
     <form id="reservaForm">
@@ -67,7 +67,7 @@
         <button type="submit" class="btn">Confirmar Reserva</button>
     </form>
 
-    <div class="loading" id="loadingState">Cargando agenda de la nube...</div>
+    <div class="loading" id="loadingState">Sincronizando con la nube...</div>
 
     <div class="reservas-section">
         <h2>Agenda de Reservas Activas</h2>
@@ -76,38 +76,26 @@
 </div>
 
 <script>
-    // URL oficial de CCOO Sanidad
-    const WEB_APP_URL = "https://google.com";
+    // Enlace de Google Apps Script optimizado para la nueva cuenta de Gmail
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxD-Cic9Qx50TN-LRFrg3IBww6YjZ8grNokSjjaER61Ytfv8vTroAUqMcBQlqEg0uj6/exec";
 
     let reservas = [];
     const loadingState = document.getElementById('loadingState');
 
-    document.getElementById('fecha').min = new Date().toISOString().split('T');
+    // Impedir que se escojan fechas pasadas en el calendario
+    document.getElementById('fecha').min = new Date().toISOString().split('T')[0];
 
-    // Función global que recibirá los datos de Google de forma segura (JSONP)
-    window.recibirDatosGoogle = function(datos) {
-        reservas = datos;
-        renderReservas();
-        showLoading(false);
-    };
-
-    function cargarReservas() {
+    async function cargarReservas() {
         showLoading(true);
-        
-        // Eliminamos el bloque anterior de fetch que fallaba por CORS corporativo.
-        // Creamos un elemento script dinámico que evita por completo las restricciones de red.
-        const viejoScript = document.getElementById('jsonpScript');
-        if (viejoScript) viejoScript.remove();
-
-        const script = document.createElement('script');
-        script.id = 'jsonpScript';
-        script.src = `${WEB_APP_URL}?callback=recibirDatosGoogle&_nocache=${Date.now()}`;
-        script.onerror = function() {
-            document.getElementById('listaReservas').innerHTML = '<p style="color:#888; font-style:italic; font-size:13px;">Error de red o permisos institucionales en Google Sheets.</p>';
-            showLoading(false);
-        };
-        
-        document.body.appendChild(script);
+        try {
+            const response = await fetch(WEB_APP_URL);
+            reservas = await response.json();
+            renderReservas();
+        } catch (error) {
+            console.error("Error al cargar datos:", error);
+            document.getElementById('listaReservas').innerHTML = '<p style="color:#888; font-style:italic; font-size:13px;">Error de sincronización inicial.</p>';
+        }
+        showLoading(false);
     }
 
     function renderReservas() {
@@ -115,21 +103,20 @@
         lista.innerHTML = '';
         
         if (!Array.isArray(reservas) || reservas.length === 0) {
-            lista.innerHTML = '<p style="color:#888; font-style:italic; font-size:14px;">No hay reservas registradas en este momento.</p>';
+            lista.innerHTML = '<p style="color:#888; font-style:italic; font-size:14px;">No hay reservas registradas.</p>';
             return;
         }
 
         reservas.sort((a,b) => new Date(a.fecha) - new Date(b.fecha));
 
         reservas.forEach(res => {
-            if(!res.fecha) return;
             const card = document.createElement('div');
             card.className = 'card';
             card.innerHTML = `
                 <div class="card-info">
-                    <h3>${res.vehiculo || 'Vehículo'}</h3>
-                    <p><strong>Por:</strong> ${res.usuario || 'Anónimo'}</p>
-                    <p><strong>Fecha:</strong> ${formatearFecha(res.fecha)} | <strong>Turno:</strong> ${res.turno || 'Completo'}</p>
+                    <h3>${res.vehiculo}</h3>
+                    <p><strong>Por:</strong> ${res.usuario}</p>
+                    <p><strong>Fecha:</strong> ${formatearFecha(res.fecha)} | <strong>Turno:</strong> ${res.turno}</p>
                 </div>
                 <button class="btn-delete" onclick="borrarReserva('${res.id}')">Cancelar</button>
             `;
@@ -145,6 +132,7 @@
         const fecha = document.getElementById('fecha').value;
         const turno = document.getElementById('turno').value;
 
+        // Validar conflicto de horario
         const conflicto = reservas.find(r => r.vehiculo === vehiculo && r.fecha === fecha && 
             (r.turno === turno || r.turno === "Día Completo" || turno === "Día Completo")
         );
@@ -168,15 +156,16 @@
             await fetch(WEB_APP_URL, {
                 method: 'POST',
                 mode: 'no-cors',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(nuevaReserva)
             });
             
+            // Forzar actualización suave tras guardar
             setTimeout(() => {
                 cargarReservas();
                 document.getElementById('reservaForm').reset();
-                document.getElementById('fecha').min = new Date().toISOString().split('T');
-            }, 1500);
+                document.getElementById('fecha').min = new Date().toISOString().split('T')[0];
+            }, 1200);
             
         } catch (error) {
             alert('Error al guardar la reserva.');
@@ -192,13 +181,13 @@
             await fetch(WEB_APP_URL, {
                 method: 'POST',
                 mode: 'no-cors',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: "delete", id: id })
             });
             
-            setTimeout(() => { cargarReservas(); }, 1500);
+            setTimeout(() => { cargarReservas(); }, 1200);
         } catch (error) {
-            alert('Error al intentar eliminar la reserva.');
+            alert('Error al eliminar la reserva.');
             showLoading(false);
         }
     }
@@ -212,7 +201,6 @@
         return isNaN(d) ? f : d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
-    // Inicializar
     cargarReservas();
 </script>
 </body>
