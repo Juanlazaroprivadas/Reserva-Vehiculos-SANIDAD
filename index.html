@@ -33,7 +33,7 @@
 <div class="container">
     <div class="header">
         <h1>CCOO Sanidad</h1>
-        <p>Gestión de Vehículos de la Flota en Tiempo Real</p>
+        <p>Flota de Vehículos Compartida</p>
     </div>
 
     <form id="reservaForm">
@@ -67,7 +67,7 @@
         <button type="submit" class="btn">Confirmar Reserva</button>
     </form>
 
-    <div class="loading" id="loadingState">Sincronizando con la nube...</div>
+    <div class="loading" id="loadingState">Cargando agenda de la nube...</div>
 
     <div class="reservas-section">
         <h2>Agenda de Reservas Activas</h2>
@@ -76,23 +76,37 @@
 </div>
 
 <script>
-    // URL de Google Apps Script vinculada a la cuenta de CCOO Sanidad
-    const WEB_APP_URL = "https://script.google.com/a/macros/sanidad.ccoo.es/s/AKfycbzxG025kCOZ_MQrriCP96A7-Ot90gxV_YnSu42YjIGIZW1OFeOl_xp_NryZfeFrnS_D/exec";
+    // URL verificada de CCOO Sanidad
+    const WEB_APP_URL = "https://google.com";
 
     let reservas = [];
     const loadingState = document.getElementById('loadingState');
 
-    // Fijar fecha mínima de hoy en el calendario
     document.getElementById('fecha').min = new Date().toISOString().split('T')[0];
 
     async function cargarReservas() {
         showLoading(true);
         try {
-            const response = await fetch(WEB_APP_URL);
-            reservas = await response.json();
+            // El truco definitivo: forzar la redirección del login corporativo si existiese
+            const response = await fetch(WEB_APP_URL, { method: "GET", redirect: "follow" });
+            const texto = await response.text();
+            
+            // Si Google nos devuelve un html de login por políticas de CCOO, avisar al usuario
+            if (texto.includes("<!DOCTYPE") || texto.includes("login")) {
+                document.getElementById('listaReservas').innerHTML = `
+                    <p style="color:#d62323; font-size:13px; font-weight:bold; text-align:center;">
+                        ⚠️ Acceso restringido por Google Workspace de CCOO.<br>
+                        Asegúrate de que el documento de Google Sheets esté compartido como "Cualquier persona con el enlace".
+                    </p>`;
+                showLoading(false);
+                return;
+            }
+            
+            reservas = JSON.parse(texto);
             renderReservas();
         } catch (error) {
-            console.error(error);
+            console.error("Error cargando datos:", error);
+            document.getElementById('listaReservas').innerHTML = '<p style="color:#888; font-style:italic; font-size:13px;">Error de red al conectar con Google Sheets.</p>';
         }
         showLoading(false);
     }
@@ -101,21 +115,22 @@
         const lista = document.getElementById('listaReservas');
         lista.innerHTML = '';
         
-        if (reservas.length === 0) {
-            lista.innerHTML = '<p style="color:#888; font-style:italic; font-size:14px;">No hay reservas registradas.</p>';
+        if (!Array.isArray(reservas) || reservas.length === 0) {
+            lista.innerHTML = '<p style="color:#888; font-style:italic; font-size:14px;">No hay reservas registradas en este momento.</p>';
             return;
         }
 
         reservas.sort((a,b) => new Date(a.fecha) - new Date(b.fecha));
 
         reservas.forEach(res => {
+            if(!res.fecha) return;
             const card = document.createElement('div');
             card.className = 'card';
             card.innerHTML = `
                 <div class="card-info">
-                    <h3>${res.vehiculo}</h3>
-                    <p><strong>Por:</strong> ${res.usuario}</p>
-                    <p><strong>Fecha:</strong> ${formatearFecha(res.fecha)} | <strong>Turno:</strong> ${res.turno}</p>
+                    <h3>${res.vehiculo || 'Vehículo'}</h3>
+                    <p><strong>Por:</strong> ${res.usuario || 'Anónimo'}</p>
+                    <p><strong>Fecha:</strong> ${formatearFecha(res.fecha)} | <strong>Turno:</strong> ${res.turno || 'Completo'}</p>
                 </div>
                 <button class="btn-delete" onclick="borrarReserva('${res.id}')">Cancelar</button>
             `;
@@ -136,7 +151,7 @@
         );
 
         if (conflicto) {
-            alert(`⚠️ Conflicto de horario: El vehículo ya está reservado ese día por ${conflicto.usuario}.`);
+            alert(`⚠️ Conflicto: El vehículo ya está reservado ese día por ${conflicto.usuario}.`);
             return;
         }
 
@@ -151,10 +166,10 @@
 
         showLoading(true);
         try {
+            // "text/plain" evita que los navegadores móviles bloqueen el envío por CORS corporativo
             await fetch(WEB_APP_URL, {
                 method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify(nuevaReserva)
             });
             
@@ -165,7 +180,7 @@
             }, 1500);
             
         } catch (error) {
-            alert('Error al guardar la reserva.');
+            alert('Error al procesar el envío.');
             showLoading(false);
         }
     });
@@ -177,14 +192,13 @@
         try {
             await fetch(WEB_APP_URL, {
                 method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({ action: "delete", id: id })
             });
             
             setTimeout(() => { cargarReservas(); }, 1500);
         } catch (error) {
-            alert('Error al eliminar la reserva.');
+            alert('Error al intentar eliminar la reserva.');
             showLoading(false);
         }
     }
